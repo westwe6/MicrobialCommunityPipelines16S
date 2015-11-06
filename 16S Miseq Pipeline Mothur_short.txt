@@ -1,0 +1,310 @@
+#How to use MSU HPCC system for MiSeq analysis using FastQC, Trimmomatic, R, and Mothur
+#9-25-15
+#Will West
+
+#Access MSU HPCC Server
+ssh -X userid@hpcc.msu.edu
+
+#Access a developer node from a gateway (CPU used for processing sequences, this is the processing power version)
+ssh dev-intel07 (chose other nodes if you want more performance and processor cores (k20=20 cores)
+
+#Access MSU HPCC Server
+ssh -X userid@gateway.hpcc.msu.edu 
+
+#Use FileZilla to upload or download files from server userid@gateway.hpcc.msu.edu to the desktop:
+
+Hostname: gateway.hpcc.msu.edu
+Username: userid
+Password: net id password
+Port: 22
+
+#Make directories in Documents folder
+cd Documents
+mkdir fastq16S
+cd fastq16S
+mkdir QC
+mkdir TrimFastq16S
+cd TrimFastq16S
+mkdir paired
+mkdir unpaired
+cd /mnt/home/userid/Documents/fastq16S
+
+#Load FastQC, this program is designed to assess base pair quality scores, kmer content, adapter content, gc content, etc of reads.
+module load FastQC
+
+# Finds all files with the ending 001.fastq and combines them into one file called forward.fastq and one reverse.fastq
+cat *R1_001.fastq > forward_16S.fastq
+cat *R2_001.fastq > reverse_16S.fastq
+
+#Move forward.fastq to the QC directory
+mv forward_16S.fastq /mnt/home/userid/Documents/fastq16S/QC
+mv reverse_16S.fastq /mnt/home/userid/Documents/fastq16S/QC
+
+
+#This creates two quality assessment files forward.html and forward.zip and does the same for the reverse. These files assess the quality of your reads.
+#fastqc ./ can be run on forward and reverse reads of individual samples as well
+fastqc ./forward_16S.fastq
+fastqc ./reverse_16S.fastq
+
+#Next move into the QC folder and look at each of the fastqc files (this will create a GUI where you can look at the html or the content of the zip files)
+cd
+fastqc 
+
+#move to the fastq16S directory:
+cd /mnt/home/userid/Documents/fastq16S
+
+#Your next step is to improve the quality of your samples using trimmomatic in a bash shell script.
+#Make sure the 16S V9 primers (Fluidigm-PE.fa) are included in the fastq16S directory (this can be done using nano or filezilla).
+#Create a shell script called trimmomaticPE_QC.sh, this shell will be used to quality score (minimum 20 base Q-score accepted, and minimum read length of 125)
+#The script also removes adapters, primer dimers, and flips reads to make sure they are able to be paired.
+#To do this type the line nano trimmomaticPE_QC.sh and then input the following lines including, but ending with 'done':
+
+nano trimmomaticPE_QC.sh
+
+#!/bin/bash
+	
+	for file in $(<filelist_PE_QC.txt)
+do
+	java -jar $TRIM/trimmomatic  PE -threads 4 -trimlog mv ${file}_QC_PE_log.fasta ${file}_L001_R1_001.fastq ${file}_L001_R2_001.fastq ${file}_L001_R1_001_pTrim.fastq ${file}_L001_R1_001_uTrim.fastq ${file}_L001_R2_001_pTrim.fastq ${file}_L001_R2_001_uTrim.fastq ILLUMINACLIP:Fluidigm-PE.fa:2:30:12 LEADING:20 TRAILING:20 MINLEN:125
+
+done
+
+#Hit control x, then y, then enter to save the trimmomaticPE_QC.sh (there will be prompts).
+
+#The following line makes the shell script executable and read-only:
+chmod 755 trimmomaticPE_QC.sh
+
+#To execute this the trimmomaticPE_QC.sh shell script, you need to create filelist_PE_QC.txt using trimmomatic.files.R, 
+#which contains a list of the forward and reverse reads, but without the suffix "_L001_R1_001.fastq" or "_L001_R2_001.fastq".
+
+#Load R on the MSU HPCC
+module load R
+R
+
+#This code can be found in trimmomatic.files.R:
+
+library("stringr")
+library("plyr")
+
+filenames <- system("ls *fastq*", intern=T)
+
+forward="R1"
+reverse="R2"
+
+R1_idx <- grep(forward, filenames)
+R1_files <- filenames[R1_idx]
+
+R2_idx <- grep(reverse, filenames)
+R2_files <- filenames[R2_idx]
+
+filenames.fin <- data.frame(R1_files, R2_files)
+
+QC.files <- data.frame(group=ldply(str_split(filenames.fin[,1], "16S"))$V1, filenames.fin)
+
+write.table(QC.files[,2], "filelist_PE_QC.txt", sep = "\t", row.names=F, col.names=F, quote=F)
+
+#To run trimmomatic execute the shell script trimmomaticPE_QC.sh and quality control your paired-end reads type:
+#Keep track of the trimmomatic version used for manuscript purposes
+#Also, for now you are going to have to manually remove the _L001_R1.fastq from each file in the "filelist_PE_QC.txt"
+#In a newer version I will do this in the R code above.
+
+module load trimmomatic 
+./trimmomaticPE_QC.sh 
+
+# The above code created log files (which describe what was trimmed, what adapters, and primer dimers were removed), 
+#pTrim.fastq files (forward and reverse) are created, which are contains sample reads that were able to successfully paired.
+#uTrim.fastq files contain reads which weren't paired successfully.
+#Move successfully paired (*pTrim.fastq) and poor quality reads (*uTrim.fastq) to the paired and unpaired directories (created earlier)
+mv *pTrim.fastq /mnt/home/userid/DocumentsM/fastq16S/TrimFastq16S/paired
+mv *uTrim.fastq /mnt/home/userid/DocumentsM/fastq16S/TrimFastq16S/unpaired
+mv *log.fasta /mnt/home/userid/DocumentsM/fastq16S/TrimFastq16S/unpaired
+
+cd /mnt/home/userid/DocumentsM/fastq16S/TrimFastq16S/paired
+
+#May need to use fastq-quality-filter to remove any low leftover quality basepairs/reads
+#module load fastx
+#Fastq_quality_filter
+#fastq_quality_filter -v -q 20 -p 50 -i IA_7_T_16S_CGAAGTAT-CTACTATA_L001_R2_001.fastq -o IA_7_T_16S_CGAAGTAT-CTACTATA_L001_R2_001_qc.fastq
+
+#	version 0.0.6
+#	   [-h]         = This helpful help screen.
+#	   [-q N]       = Minimum quality score to keep.
+#	   [-p N]       = Minimum percent of bases that must have [-q] quality.
+#	   [-z]         = Compress output with GZIP.
+#	   [-i INFILE]  = FASTA/Q input file. default is STDIN.
+3	   [-o OUTFILE] = FASTA/Q output file. default is STDOUT.
+#	   [-v]         = Verbose - report number of sequences.
+#			  If [-o] is specified,  report will be printed to STDOUT.
+#			  If [-o] is not specified (and output goes to STDOUT),
+#			  report will be printed to STDERR.
+
+#Before mothur can be run to process sequence reads and create OTU tables, you need to create a "stability.files" list, which
+#actually can be called anything you want. "stability.files" contains columns with the truncated name of the sample (1st column), 
+#the complete file names of the quality controlled forward (2nd column) and reverse reads (3rd column). 
+#The creation of this file can be done in R using the following script (stability.files.creator.R):
+
+
+
+#Use the following Script in R (stability.files.creator.R), #Also, for now you are going to have to manually remove the _L001_R1.fastq from each file in the "stability.files"
+#In a newer version I will do this in the R code above.
+
+library("stringr")
+library("plyr")
+
+filenames <- system("ls *fastq*", intern=T)
+
+forward="R1"
+reverse="R2"
+
+R1_idx <- grep(forward, filenames)
+R1_files <- filenames[R1_idx]
+
+R2_idx <- grep(reverse, filenames)
+R2_files <- filenames[R2_idx]
+
+filenames.fin <- data.frame(R1_files, R2_files)
+
+stability.files <- data.frame(group=ldply(str_split(filenames.fin[,1], "16S"))$V1, filenames.fin)
+
+write.table(stability.files, "stability.files", sep = "\t", row.names=F, col.names=F, quote=F)
+
+
+#This is a mothur tutorial to process all samples into OTUs (keep track of the version you use, I prefer 1.35.1 at the time this was written)
+module load mothur/1.35.1
+mothur
+
+#Make contigs (this can be slow, depending on the # of processors chosen)
+make.contigs(file=stability.files, processors=20)
+
+#Let's look at a summary of the files contigs you just made (ambiguities, contig lengths, etc)
+summary.seqs(fasta=stability.trim.contigs.fasta)
+
+#Removes sequences with greater than 275bp (currently) (this eliminates sequences w/ ambiguities or sequences longer than your target sequence length)
+screen.seqs(fasta=current, group=current, maxambig=0, maxlength=275)
+
+#This helps you keep track of what files mothur is using in the current session
+get.current()
+
+#Removes duplicate sequences
+unique.seqs()
+
+#Generates a table where the rows are the names of the unique seqeunces and the columns are the names of the groups. The table is then filled with the number of times each unique sequence (see line above) shows up in each group.
+count.seqs(name=current, group=current)
+
+#Creates a summary which accounts for current unique sequences and total sequences that have passed the previous steps.
+summary.seqs(count=current)
+
+#Creates a reference sequence customized to the start and end of the sequence (important:you need to know the length and region of this reference sequence). 
+#The current settings (start=11894, end=25319) only applies to silva.nr_v119.align reference (This file needs to be in the folder you are working in).
+pcr.seqs(fasta=silva.nr_v119.align, start=11894, end=25319, keepdots=F, processors=20)
+
+#Rename reference file to something simpler
+system(mv silva.nr_v119.pcr.align silva.bacteria.fasta)
+
+#Summarizes newly created silva.eu.fasta file (contains information about sequence identity, start and end)
+summary.seqs(fasta=silva.bacteria.fasta)
+
+#Aligns your contigs to the reference sequences (creates a report file and a file containing the alignments)
+align.seqs(fasta=current, reference=silva.bacteria.fasta, flip=T)
+
+#Summary of the contig-reference alignment (similar to previous summary, but it is important you look at this summary, before you type in the next line of the script).
+summary.seqs(fasta=current, count=stability.trim.contigs.good.count_table)
+
+#So by looking at the previous summary you will see that some sequences start and end in the same spot, this could be due to deletions or insertions and so we have to remove sequences that don't fit
+#Choose the median or the most representative sequences in the summary, and choose the start and end point of those sequences, as well as the max number of homopolymers allowed in those sequences
+#This line of code can really influence your final data output.
+screen.seqs(fasta=current, count=current, start=40747, end=42072, maxhomop=6)
+
+#Now we should have sequences that are aligned, but there are still overhangs
+summary.seqs(fasta=current, count=current)
+
+#Let's truncate the overhangs of each sequences (all sequences after this step will have the same length and start end in the same place). 
+filter.seqs(fasta=current, vertical=T, trump=.)
+
+#An easier way to look at summary files (use the current files)
+summary.seqs(fasta=current, count=current)
+
+#Now let's remove any duplicate sequences present again, since the truncation likely created a bunch of duplicates sequences.
+#The duplicates sequences will be tracked and added to the count table.
+unique.seqs(fasta=current, count=current)
+
+#This is the number of sequences total and unique before clustering and chimera removal.
+summary.seqs(fasta=current, count=current)
+
+#Let's cluster sequences by how many differences they have (rule of thumb 1 nucleotide difference per 100bp). This will combine sequences if nucleotide difference is less than  or equal to 2.
+pre.cluster(fasta=current, count=current, diffs=2)
+
+#Removes chimeras from count table (default: dereplicate=F, which removes chimeras automatically, be careful it sometimes removes rare sequences)
+#Tells you the percentage of chimeras found in each sample as it processes them
+chimera.uchime(fasta=current, count=current, dereplicate=t)
+
+#Remove chimeras from fasta file (Tells you the percentage of chimeras found in each sample as it processes them)
+remove.seqs(fasta=current, accnos=current)
+
+#Gives you the percentage of chimeras found, which should be less than 10%)
+summary.seqs(fasta=current, count=current)
+
+#Bayesian classifier (classifies sequences based on known DNA samples and we want to remove unknown or randomly amplified "stuff", this is very specific to your study)
+#Use the reference file created earlier (silva.eu.fasta) and the taxonomy file silva.nr_119.tax)
+#Make sure to have the silva.nr_v119.tax in the same directory with all trimmed fasta files (presumably the paired directory).
+classify.seqs(fasta=current, count=current, reference=silva.bacteria.fasta, taxonomy=silva.nr_v119.tax, cutoff=80)
+
+#Filters out mitochondria, bacteria, and archaea, but should leave you with sequences classified as unknown and the eukaryotes, which you want.
+remove.lineage(fasta=current, count=current, taxonomy=current, taxon=Mitochondria-Bacteria-Archaea)
+
+
+#In this approach, we use the taxonomic information to split the sequences into bins and then cluster within each bin. We've published results showing that if you split at the level of Order or Family, and cluster to a 0.03 cutoff, you'll get just as good of clustering as you would with the "traditional" approach. The advantage of the cluster.split approach is that it should be faster, use less memory, and can be run on multiple processors. In an ideal world we would prefer the traditional route because "Trad is rad", but we also think that kind of humor is funny.... In this command we use taxlevel=4, which corresponds to the level of Order.
+cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, cutoff=0.15)
+
+#Next we want to know how many sequences are in each OTU from each group and we can do this using the make.shared command. Here we tell mothur that we're really only interested in the 0.03 cutoff level:
+make.shared(list=current, count=current, label=0.03)
+
+#We probably also want to know the taxonomy for each of our OTUs. We can get the consensus taxonomy for each OTU using the classify.otu command:
+classify.otu(list=current, count=current, taxonomy=current, label=0.03)
+
+phylotype(taxonomy=current)
+
+make.shared(list=current, count=current, label=1)
+
+#We further refine OTU taxononomy for each of our OTUs to meet a ~97% cutoff identity
+classify.otu(list=current, count=current, taxonomy=current, label=1)
+
+
+#These two files are the most important in the end and contain out OTU phylogeny/classification and OTU counts, but they need to be processed further.
+stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v119.wang.pick.tx.shared
+stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v119.wang.pick.tx.1.cons.tax.summary
+
+
+#Use the R script "OTU_Post_Process_Mothur.R" to post process 16S bacteria data tables.
+rm(list=ls())
+
+s16otu=read.table("stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.pick.tx.shared",header=TRUE, sep="\t",fill=T,stringsAsFactors=F)
+s16tax=read.table("stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.pick.tx.1.cons.taxonomy",header=TRUE, sep="\t",fill=T,stringsAsFactors=F)
+s1=t(s16otu)
+s1=s1[-c(1,2,3),]
+colnames(s1)=s16otu[,2]
+s16=cbind(s16tax[,c(3,1)],s1)
+colnames(s16)[c(1,2)]=c("Taxonomy","OTU")
+
+
+s18otu=read.table("stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v119.wang.pick.tx.shared",header=TRUE, sep="\t",fill=T,stringsAsFactors=F)
+s18tax=read.table("stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v119.wang.pick.tx.1.cons.taxonomy",header=TRUE, sep="\t",fill=T,stringsAsFactors=F)
+s2=t(s18otu)
+s2=s2[-c(1,2,3,239),]
+colnames(s2)=s18otu[,2]
+s18=cbind(s18tax[,c(3,1)],s2)
+colnames(s18)[c(1,2)]=c("Taxonomy","OTU")
+
+write.table(s18,"Nambia_Iowa_16S_9-28-15.txt",sep="\t",row.names=FALSE)
+
+import_biom("stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.tx.1.biom", parseFunction = parse_taxonomy_default)
+
+make.biom(shared=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.tx.shared, constaxonomy=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.tx.1.cons.taxonomy)
+
+mothur_list_file  <- "stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.an.unique_list.list"
+mothur_group_file <- "~/Downloads/mothur/Esophagus/esophagus.good.groups"
+
+import_mothur(mothur_list_file = "stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.an.unique_list.list", mothur_group_file
+  = NULL, mothur_tree_file = NULL, cutoff = NULL,
+  mothur_shared_file = "stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.tx.shared", mothur_constaxonomy_file =
+  "stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.tx.1.cons.taxonomy", 3)
