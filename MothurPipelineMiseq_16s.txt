@@ -1,3 +1,66 @@
+#How to use MSU HPCC system for MiSeq analysis using FastQC, Trimmomatic, R, and Mothur
+#9-25-15
+#Will West
+
+#Access MSU HPCC Server
+ssh -X userid@hpcc.msu.edu
+
+#Access a developer node from a gateway (CPU used for processing sequences, this is the processing power version)
+ssh dev-intel07 (chose other nodes if you want more performance and processor cores (k20=20 cores)
+
+#Access MSU HPCC Server
+ssh -X userid@gateway.hpcc.msu.edu 
+
+#Use FileZilla to upload or download files from server userid@gateway.hpcc.msu.edu to the desktop:
+
+Hostname: gateway.hpcc.msu.edu
+Username: userid
+Password: net id password
+Port: 22
+
+#Make directories in Documents folder
+cd Documents
+mkdir fastq16S
+cd fastq16S
+mkdir QC
+mkdir TrimFastq16S
+cd TrimFastq16S
+mkdir paired
+mkdir unpaired
+cd /mnt/home/userid/Documents/fastq16S
+
+#Load FastQC, this program is designed to assess base pair quality scores, kmer content, adapter content, gc content, etc of reads.
+module load FastQC
+
+# Finds all files with the ending 001.fastq and combines them into one file called forward.fastq and one reverse.fastq
+cat *R1_001.fastq > forward_16S.fastq
+cat *R2_001.fastq > reverse_16S.fastq
+
+#Move forward.fastq to the QC directory
+mv forward_16S.fastq /mnt/home/userid/Documents/fastq16S/QC
+mv reverse_16S.fastq /mnt/home/userid/Documents/fastq16S/QC
+
+
+#This creates two quality assessment files forward.html and forward.zip and does the same for the reverse. These files assess the quality of your reads.
+#fastqc ./ can be run on forward and reverse reads of individual samples as well
+fastqc ./forward_16S.fastq
+fastqc ./reverse_16S.fastq
+
+#Next move into the QC folder and look at each of the fastqc files (this will create a GUI where you can look at the html or the content of the zip files)
+cd
+fastqc 
+
+#move to the fastq16S directory:
+cd /mnt/home/userid/Documents/fastq16S
+
+#Your next step is to improve the quality of your samples using trimmomatic in a bash shell script.
+#Make sure the 16S V9 primers (Fluidigm-PE.fa) are included in the fastq16S directory (this can be done using nano or filezilla).
+#Create a shell script called trimmomaticPE_QC.sh, this shell will be used to quality score (minimum 20 base Q-score accepted, and minimum read length of 125)
+#The script also removes adapters, primer dimers, and flips reads to make sure they are able to be paired.
+#To do this type the line nano trimmomaticPE_QC.sh and then input the following lines including, but ending with 'done':
+
+nano trimmomaticPE_QC.sh
+
 #Open your working directory, which contain the files you want to work with (fastq)
 cd /Users/MacbookPro/Desktop/Mothur/MiSeq_SOP
 
